@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<h2>👋 Welcome, {{ request.user.username }}</h2>
+
+<!-- BALANCE CARD -->
+<div style="
+    background: linear-gradient(135deg, #43cea2, #185a9d);
+    color:white;
+    padding:20px;
+    border-radius:10px;
+    font-size:22px;
+    margin-bottom:20px;
+">
+    💰 Balance: ₹{{ balance }}
+</div>
+
+{% if error %}
+<p style="color:red;">{{ error }}</p>
+{% endif %}
+
+<!-- ADD MONEY -->
+<div style="
+    background:white;
+    padding:20px;
+    border-radius:10px;
+    box-shadow:0px 3px 10px rgba(0,0,0,0.1);
+    margin-bottom:20px;
+">
+<h3>➕ Add Money</h3>
+<form method="post" action="/add-money/">
+    {% csrf_token %}
+    <input type="number" name="amount" placeholder="Amount" required style="padding:8px;">
+    <button style="background:#28a745; color:white; padding:8px;">Add</button>
+</form>
+</div>
+
+<!-- TRANSFER -->
+<div style="
+    background:white;
+    padding:20px;
+    border-radius:10px;
+    box-shadow:0px 3px 10px rgba(0,0,0,0.1);
+">
+<h3>💸 Transfer Money</h3>
+<form method="post" action="/transfer/">
+    {% csrf_token %}
+    <input type="text" name="receiver" placeholder="Receiver" required style="padding:8px;">
+    <input type="number" name="amount" placeholder="Amount" required style="padding:8px;">
+    <button style="background:#ff9800; color:white; padding:8px;">Send</button>
+</form>
+</div>
+
+<br>
+
+<!-- PDF -->
+<a href="http://127.0.0.1:8001/transactions/statement?username={{ request.user.username }}"
+   style="
+    display:inline-block;
+    padding:10px 15px;
+    background:#673ab7;
+    color:white;
+    border-radius:5px;
+">
+📄 Download Statement
+</a>
+
+{% endblock %}

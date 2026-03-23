@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Digital Banking</title>
+</head>
+
+<body style="margin:0; font-family:Arial; background:#eef2f7;">
+
+<!-- NAVBAR -->
+<div style="
+    background: linear-gradient(90deg, #ff7e5f, #feb47b);
+    color:white;
+    padding:15px;
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+">
+    <div style="font-size:24px; font-weight:bold;">💳 MyBank</div>
+    <div>
+        <a href="/dashboard/" style="color:white; margin-right:15px;">Dashboard</a>
+        <a href="/history/" style="color:white; margin-right:15px;">History</a>
+        <a href="/logout/" style="color:white;">Logout</a>
+        <a href="{% url 'download_pdf' %}">Download PDF</a>
+    </div>
+</div>
+
+<!-- TITLE -->
+<div style="
+    text-align:center;
+    padding:25px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color:white;
+    font-size:32px;
+    font-weight:bold;
+    letter-spacing:1px;
+">
+    🚀 Digital Banking System
+</div>
+
+<!-- CONTENT -->
+<div style="padding:20px;">
+    {% block content %}
+    {% endblock %}
+</div>
+
+</body>
+</html>

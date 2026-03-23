@@ -1,0 +1,30 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<h2>📊 Transaction History</h2>
+
+<table style="
+    width:100%;
+    border-collapse:collapse;
+    background:white;
+    border-radius:10px;
+    overflow:hidden;
+">
+
+<tr style="background:#667eea; color:white;">
+    <th style="padding:10px;">Sender</th>
+    <th style="padding:10px;">Receiver</th>
+    <th style="padding:10px;">Amount</th>
+</tr>
+
+{% for t in transactions %}
+<tr style="text-align:center; border-bottom:1px solid #ddd;">
+    <td style="padding:10px;">{{ t.sender }}</td>
+    <td style="padding:10px;">{{ t.receiver }}</td>
+    <td style="padding:10px;">₹{{ t.amount }}</td>
+</tr>
+{% endfor %}
+
+</table>
+
+{% endblock %}
