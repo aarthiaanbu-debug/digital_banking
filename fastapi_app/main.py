@@ -6,11 +6,21 @@ from jose import jwt
 from datetime import datetime, timedelta
 from pydantic import BaseModel
 from reportlab.pdfgen import canvas
+import random
+import smtplib
+from email.mime.text import MIMEText
+from fastapi import Header
+from fastapi import BackgroundTasks
+
+def get_current_user(authorization: str = Header()):
+    token = authorization.split(" ")[1]
+
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    return payload["sub"]
 
 # ------------------ CONFIG ------------------
 
 DATABASE_URL = "sqlite:///./bank.db"
-
 SECRET_KEY = "secretkey"
 ALGORITHM = "HS256"
 
@@ -19,6 +29,44 @@ app = FastAPI()
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()
+
+# ------------------ EMAIL CONFIG ------------------
+
+EMAIL = "aarthiaanbu@gmail.com"
+APP_PASSWORD = "pmmvyzxbunhposmn"
+
+def send_otp_email(otp):
+    try:
+        print("📧 Sending OTP...")
+
+        msg = MIMEText(f"Your OTP is: {otp}")
+        msg["Subject"] = "Transaction OTP"
+        msg["From"] = EMAIL
+        msg["To"] = "aarthia290302@gmail.com"
+
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+
+        print("🔐 Logging in...")
+        server.login(EMAIL, APP_PASSWORD)
+
+        print("📤 Sending mail...")
+        server.sendmail(EMAIL, "aarthia290302@gmail.com", msg.as_string())
+
+        server.quit()
+
+        print("✅ EMAIL SENT SUCCESSFULLY")
+
+    except Exception as e:
+        print("❌ EMAIL ERROR:", e)
+
+# ------------------ OTP ------------------
+
+otp_store = {}
+OTP_LIMIT = 5000
+
+def generate_otp():
+    return str(random.randint(100000, 999999))
 
 # ------------------ MODELS ------------------
 
@@ -29,7 +77,6 @@ class User(Base):
     username = Column(String, unique=True)
     password = Column(String)
     balance = Column(Integer, default=0)
-
 
 class Transaction(Base):
     __tablename__ = "transactions"
@@ -47,12 +94,11 @@ class UserCreate(BaseModel):
     username: str
     password: str
 
-
 class TransferRequest(BaseModel):
     sender: str
     receiver: str
     amount: int
-
+    otp: str | None = None   # optional OTP
 
 class AddMoneyRequest(BaseModel):
     username: str
@@ -66,14 +112,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-# ------------------ JWT ------------------
-
-def create_token(data: dict):
-    to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(hours=1)
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 # ------------------ AUTH ------------------
 
@@ -97,7 +135,7 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
     if not db_user or db_user.password != user.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
-    token = create_token({"sub": user.username})
+    token = jwt.encode({"sub": user.username}, SECRET_KEY, algorithm=ALGORITHM)
     return {"access_token": token}
 
 # ------------------ ACCOUNT ------------------
@@ -124,9 +162,17 @@ def add_money(data: AddMoneyRequest, db: Session = Depends(get_db)):
 
     return {"message": "Money added", "balance": user.balance}
 
+# ------------------ TRANSFER WITH OTP + EMAIL ------------------
 
 @app.post("/account/transfer")
-def transfer(data: TransferRequest, db: Session = Depends(get_db)):
+
+def transfer(
+    data: TransferRequest,
+    background_tasks: BackgroundTasks,   # ✅ FIRST
+    db: Session = Depends(get_db),
+    current_user: str = Depends(get_current_user),
+):
+
     sender = db.query(User).filter(User.username == data.sender).first()
     receiver = db.query(User).filter(User.username == data.receiver).first()
 
@@ -139,6 +185,43 @@ def transfer(data: TransferRequest, db: Session = Depends(get_db)):
     if sender.balance < data.amount:
         raise HTTPException(status_code=400, detail="Insufficient balance")
 
+    # -------- OTP LOGIC --------
+    if data.amount > OTP_LIMIT:
+
+        # STEP 1: SEND OTP
+        if not data.otp:
+            otp = generate_otp()
+
+            print("🔥 OTP GENERATED:", otp)
+            
+            otp_store[data.sender] = {
+    "otp": otp,
+    "expiry": datetime.now() + timedelta(minutes=5),
+    "attempts": 0   # ✅ ADD HERE
+}
+
+           
+            send_otp_email(otp)
+
+            return {"detail": "OTP sent to email"}
+
+        # STEP 2: VERIFY OTP
+        stored = otp_store.get(data.sender)
+
+    if not stored:
+     raise HTTPException(status_code=400, detail="OTP not found")
+
+    if stored["attempts"] >= 3:
+     raise HTTPException(status_code=400, detail="Too many attempts")
+
+    if datetime.now() > stored["expiry"]:
+     raise HTTPException(status_code=400, detail="OTP expired")
+
+    if stored["otp"] != data.otp:
+     stored["attempts"] += 1   # ✅ ADD THIS
+    raise HTTPException(status_code=400, detail="Invalid OTP")
+
+    # -------- TRANSFER --------
     sender.balance -= data.amount
     receiver.balance += data.amount
 
@@ -153,7 +236,7 @@ def transfer(data: TransferRequest, db: Session = Depends(get_db)):
 
     return {"message": "Transfer successful"}
 
-# ------------------ TRANSACTIONS ------------------
+# ------------------ HISTORY ------------------
 
 @app.get("/transactions/history")
 def history(username: str, db: Session = Depends(get_db)):
@@ -162,16 +245,9 @@ def history(username: str, db: Session = Depends(get_db)):
         (Transaction.receiver == username)
     ).all()
 
-    result = []
-    for t in txns:
-        result.append({
-            "sender": t.sender,
-            "receiver": t.receiver,
-            "amount": t.amount
-        })
+    return txns
 
-    return result
-
+# ------------------ STATEMENT ------------------
 
 @app.get("/transactions/statement")
 def statement(username: str, db: Session = Depends(get_db)):
@@ -187,8 +263,7 @@ def statement(username: str, db: Session = Depends(get_db)):
 
     y = 750
     for t in txns:
-        line = f"{t.sender} -> {t.receiver} : ₹{t.amount}"
-        c.drawString(100, y, line)
+        c.drawString(100, y, f"{t.sender} -> {t.receiver} : ₹{t.amount}")
         y -= 30
 
     c.save()

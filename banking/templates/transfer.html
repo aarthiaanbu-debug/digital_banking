@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Transfer Money</title>
+</head>
+<body>
+
+<h2>💸 Transfer Money</h2>
+
+<form method="POST">
+    {% csrf_token %}
+
+    <label>Receiver Username:</label><br>
+    <input type="text" name="receiver" required><br><br>
+
+    <label>Amount:</label><br>
+    <input type="number" name="amount" required><br><br>
+
+    <button type="submit">Send</button>
+</form>
+
+<br>
+<a href="/dashboard/">⬅ Back to Dashboard</a>
+
+</body>
+</html>

@@ -1,147 +1,170 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.models import User
-from django.contrib.auth import authenticate, login, logout
 from django.contrib import messages
+from decimal import Decimal
+import random
+
+from django.conf import settings
+from django.core.mail import send_mail
 from django.http import HttpResponse
 from django.db.models import Q
-import requests
 
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Table
 from reportlab.lib import colors
+from reportlab.platypus import TableStyle
 
-from .models import Transaction, UserData
-
-FASTAPI_URL = "http://127.0.0.1:8001"
+from .models import Account, Transaction
 
 
 # ---------------- SIGNUP ----------------
 def signup(request):
     if request.method == "POST":
-        username = request.POST['username']
-        email = request.POST['email']
-        password = request.POST['password']
+        username = request.POST["username"]
+        password = request.POST["password"]
+        email = request.POST["email"]
 
         if User.objects.filter(username=username).exists():
             messages.error(request, "Username already exists")
-            return redirect('signup')
+            return redirect("signup")
 
-        user = User.objects.create_user(username=username, email=email, password=password)
+        user = User.objects.create_user(
+            username=username,
+            password=password,
+            email=email
+        )
 
-        UserData.objects.create(user=user, username=username, balance=0)
+        # Create account
+        Account.objects.create(user=user, balance=1000)
 
-        messages.success(request, "Account created successfully")
-        return redirect('login')
+        messages.success(request, "Account created")
+        return redirect("login")
 
-    return render(request, 'signup.html')
+    return render(request, "signup.html")
 
 
 # ---------------- LOGIN ----------------
 def login_view(request):
     if request.method == "POST":
-        username = request.POST['username']
-        password = request.POST['password']
+        username = request.POST["username"]
+        request.session["username"] = username
+        return redirect("dashboard")
 
-        user = authenticate(request, username=username, password=password)
-
-        if user is not None:
-            login(request, user)
-            return redirect('/dashboard/')   # 🔥 direct URL use
-        else:
-            messages.error(request, "Invalid login")
-
-    return render(request, 'login.html')
+    return render(request, "login.html")
 
 
 # ---------------- DASHBOARD ----------------
 def dashboard(request):
-    if not request.user.is_authenticated:
-        return redirect('login')
+    username = request.session.get("username")
 
-    return render(request, 'dashboard.html')
+    if not username:
+        return redirect("login")
+
+    user = User.objects.get(username=username)
+
+    account, created = Account.objects.get_or_create(user=user)
+
+    return render(request, "dashboard.html", {"account": account})
 
 
 # ---------------- TRANSFER ----------------
-def transfer(request):
-    if not request.user.is_authenticated:
-        return redirect('login')
-
+def transfer_view(request):
     if request.method == "POST":
-        receiver_username = request.POST.get('receiver').strip()
-        amount = request.POST.get('amount')
+        sender_username = request.session.get("username")
+        receiver_username = request.POST["receiver"]
+        amount = request.POST["amount"]
 
-        try:
-            response = requests.post(
-                f"{FASTAPI_URL}/account/transfer",
-                json={
-                    "sender": request.user.username,
-                    "receiver": receiver_username,
-                    "amount": int(amount)
-                }
-            )
+        # Save transfer data
+        request.session["transfer_data"] = {
+            "sender": sender_username,
+            "receiver": receiver_username,
+            "amount": amount
+        }
 
-            data = response.json()
+        # Generate OTP
+        otp = str(random.randint(100000, 999999))
+        request.session["otp"] = otp
 
-            if response.status_code == 200:
+        # 🔥 SEND EMAIL
+        sender_user = User.objects.get(username=sender_username)
 
-                # ✅ Convert Django User → UserData
-                try:
-                    sender_data = UserData.objects.get(username=request.user.username)
-                    receiver_data = UserData.objects.get(username=receiver_username)
-                except UserData.DoesNotExist:
-                    messages.error(request, "User not found in database")
-                    return redirect('dashboard')
+        send_mail(
+            "Banking OTP Verification",
+            f"Your OTP is: {otp}",
+            settings.EMAIL_HOST_USER,  # sender mail
+            ["aarthia290302@gmail.com"],  # receiver mail (your requirement)
+            fail_silently=False,
+        )
 
-                # ✅ SAVE TRANSACTION (THIS IS YOUR FIX)
-                Transaction.objects.create(
-                    sender=sender_data,
-                    receiver=receiver_data,
-                    amount=amount,
-                    status="SUCCESS"
-                )
+        print("OTP:", otp)
 
-                messages.success(request, "Transfer successful!")
+        return redirect("otp")
 
+    return render(request, "transfer.html")
+
+
+# ---------------- VERIFY OTP ----------------
+def verify_otp(request):
+    if request.method == "POST":
+        entered_otp = request.POST.get("otp")
+        session_otp = request.session.get("otp")
+
+        if entered_otp == str(session_otp):
+
+            sender = request.user
+            receiver_username = request.session.get("receiver")
+            amount = request.session.get("amount")
+
+            from django.contrib.auth.models import User
+            receiver = User.objects.filter(username=receiver_username).first()
+
+            if not receiver:
+                return HttpResponse("Receiver not found ❌")
+
+            sender_account = sender.account
+            receiver_account = receiver.account
+
+            if sender_account.balance >= amount:
+                sender_account.balance -= amount
+                receiver_account.balance += amount
+
+                sender_account.save()
+                receiver_account.save()
+
+                return HttpResponse("Money Sent Successfully ✅")
             else:
-                messages.error(request, data.get('detail', 'Transfer failed'))
+                return HttpResponse("Insufficient Balance ❌")
 
-        except requests.exceptions.ConnectionError:
-            messages.error(request, "FastAPI server not running!")
+        else:
+            return HttpResponse("Invalid OTP ❌")
 
-    return redirect('dashboard')
-
+    return render(request, "otp.html")
 
 # ---------------- HISTORY ----------------
-from django.db.models import Q
-
 def history(request):
-    if not request.user.is_authenticated:
-        return redirect('login')
+    username = request.session.get("username")
 
-    try:
-        user_data = UserData.objects.get(username=request.user.username)
-    except UserData.DoesNotExist:
-        return HttpResponse("User data not found")
+    if not username:
+        return redirect("login")
 
-    transactions = Transaction.objects.filter(
-        Q(sender=user_data) | Q(receiver=user_data)
-    ).order_by('-timestamp')
+    user = User.objects.get(username=username)
+    account, created = Account.objects.get_or_create(user=user)
 
-    return render(request, 'history.html', {'transactions': transactions})
+    txns = Transaction.objects.filter(sender=account) | Transaction.objects.filter(receiver=account)
+
+    return render(request, "history.html", {"txns": txns})
 
 
 # ---------------- DOWNLOAD PDF ----------------
 def download_pdf(request):
-    if not request.user.is_authenticated:
-        return redirect('login')
+    if not request.session.get("username"):
+        return redirect("login")
 
-    try:
-        user_data = UserData.objects.get(username=request.user.username)
-    except UserData.DoesNotExist:
-        return HttpResponse("User data not found")
+    username = request.session.get("username")
+    account = Account.objects.get(user__username=username)
 
     transactions = Transaction.objects.filter(
-        Q(sender=user_data) | Q(receiver=user_data)
-    ).order_by('-timestamp')
+        Q(sender=account) | Q(receiver=account)
+    )
 
     if not transactions.exists():
         return HttpResponse("No transactions found")
@@ -151,19 +174,13 @@ def download_pdf(request):
 
     doc = SimpleDocTemplate(response)
 
-    data = [["Sender", "Receiver", "Amount", "Type"]]
+    data = [["Sender", "Receiver", "Amount"]]
 
     for t in transactions:
-        if t.sender == user_data:
-            tx_type = "Sent"
-        else:
-            tx_type = "Received"
-
         data.append([
-            t.sender.username,
-            t.receiver.username,
-            f"₹{t.amount}",
-            tx_type
+            t.sender.user.username,
+            t.receiver.user.username,
+            f"₹{t.amount}"
         ])
 
     table = Table(data)
@@ -176,15 +193,7 @@ def download_pdf(request):
     return response
 
 
-# ---------------- ADD MONEY ----------------
-def add_money(request):
-    if request.method == "POST":
-        messages.success(request, "Money added (dummy)")
-
-    return redirect('dashboard')
-
-
 # ---------------- LOGOUT ----------------
 def logout_view(request):
-    logout(request)
-    return redirect('login')
+    request.session.flush()
+    return redirect("login")

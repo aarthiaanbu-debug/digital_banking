@@ -27,6 +27,12 @@
     box-shadow:0px 3px 10px rgba(0,0,0,0.1);
     margin-bottom:20px;
 ">
+<h2>Welcome {{ user.username }}</h2>
+
+<p>💰 Balance: ₹{{ user.balance }}</p>
+
+<a href="/transfer/">Transfer Money</a>
+<a href="/history/">Transaction History</a>
 <h3>➕ Add Money</h3>
 <form method="post" action="/add-money/">
     {% csrf_token %}
